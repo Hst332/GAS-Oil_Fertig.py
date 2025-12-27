@@ -1,26 +1,17 @@
-name: Run Forecast
+name: Oil Forecast
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "30 13 * * *"   # täglich 14:30 MEZ (13:30 UTC)
+    - cron: "30 14 * * 1-5"   # Werktags 14:30 UTC
+  workflow_dispatch:
 
 jobs:
-  forecast:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: Run forecast
-        run: |
-          python gas_price_forecast.py
+      - run: pip install -r requirements.txt
+      - run: python oil_price_forecast.py
