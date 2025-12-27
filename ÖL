@@ -1,130 +1,114 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
-Minimal, robust, go-live safe oil forecast (Brent + WTI)
-
-- Yahoo Finance only
-- Trend filter
-- Trade only on strong probabilities
-- Writes forecast_output.txt (overwrite each run)
+Clean, robust oil direction model (Brent + WTI)
 """
 
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from sklearn.linear_model import LogisticRegression
 
-# =====================
+# ------------------
 # CONFIG
-# =====================
-START_DATE = "2012-01-01"
-
+# ------------------
+START_DATE = "2010-01-01"
 BRENT = "BZ=F"
 WTI = "CL=F"
 
-PROB_LONG = 0.57
-PROB_SHORT = 0.43
+PROB_TRADE_THRESHOLD = 0.57
+OUTPUT_FILE = "oil_forecast.txt"
 
-OUTPUT_FILE = "forecast_output.txt"
-
-# =====================
+# ------------------
 # LOAD DATA
-# =====================
-def load_prices(symbol):
-    df = yf.download(symbol, start=START_DATE, progress=False)
-    if "Close" not in df.columns or len(df) < 300:
-        raise RuntimeError(f"Invalid data for {symbol}")
-    return df[["Close"]].rename(columns={"Close": symbol})
+# ------------------
+def load_prices():
+    brent = yf.download(BRENT, start=START_DATE, progress=False)
+    wti = yf.download(WTI, start=START_DATE, progress=False)
 
-# =====================
-# FEATURES
-# =====================
-def build_features(df):
-    df = df.copy()
-    df["ret"] = df.iloc[:, 0].pct_change()
-    df["ret_lag1"] = df["ret"].shift(1)
-    df["ret_lag2"] = df["ret"].shift(2)
-    df["vol5"] = df["ret"].rolling(5).std().shift(1)
-    df["sma50"] = df.iloc[:, 0].rolling(50).mean()
-    df["trend_up"] = (df.iloc[:, 0] > df["sma50"]).astype(int)
+    df = pd.DataFrame({
+        "Brent": brent["Close"],
+        "WTI": wti["Close"]
+    }).dropna()
 
-    df["target"] = (df["ret"].shift(-1) > 0).astype(int)
-    df = df.dropna()
     return df
 
-# =====================
-# MODEL
-# =====================
-def train_model(df):
-    X = df[["ret_lag1", "ret_lag2", "vol5"]]
-    y = df["target"]
-    model = LogisticRegression(max_iter=1000)
-    model.fit(X, y)
-    return model
+# ------------------
+# FEATURES
+# ------------------
+def build_features(df):
+    df["Brent_ret"] = df["Brent"].pct_change()
+    df["WTI_ret"] = df["WTI"].pct_change()
 
-# =====================
-# FORECAST
-# =====================
-def forecast(symbol):
-    prices = load_prices(symbol)
-    df = build_features(prices)
-    model = train_model(df)
+    df["Momentum_5"] = df["Brent"].pct_change(5)
+    df["Momentum_20"] = df["Brent"].pct_change(20)
+
+    df["Trend_50"] = df["Brent"] > df["Brent"].rolling(50).mean()
+    df["Trend_200"] = df["Brent"] > df["Brent"].rolling(200).mean()
+
+    df["Target"] = (df["Brent_ret"].shift(-1) > 0).astype(int)
+
+    return df.dropna()
+
+# ------------------
+# PROBABILITY ENGINE
+# ------------------
+def compute_probability(row):
+    score = 0.5
+
+    # momentum
+    if row["Momentum_5"] > 0:
+        score += 0.05
+    if row["Momentum_20"] > 0:
+        score += 0.05
+
+    # trend filter
+    if row["Trend_50"]:
+        score += 0.05
+    if row["Trend_200"]:
+        score += 0.05
+
+    return min(max(score, 0.0), 1.0)
+
+# ------------------
+# MAIN
+# ------------------
+def main():
+    df = load_prices()
+    df = build_features(df)
 
     last = df.iloc[-1]
-    X_last = last[["ret_lag1", "ret_lag2", "vol5"]].values.reshape(1, -1)
-    prob_up = float(model.predict_proba(X_last)[0][1])
+    prob_up = compute_probability(last)
+    prob_down = 1 - prob_up
 
-    trend_ok = bool(last["trend_up"])
-    price = float(prices.iloc[-1, 0])
+    trend_ok = last["Trend_50"] and last["Trend_200"]
 
-    if prob_up >= PROB_LONG and trend_ok:
+    signal = "NO_TRADE"
+    if prob_up >= PROB_TRADE_THRESHOLD and trend_ok:
         signal = "LONG"
-    elif prob_up <= PROB_SHORT and not trend_ok:
+    elif prob_down >= PROB_TRADE_THRESHOLD and not trend_ok:
         signal = "SHORT"
-    else:
-        signal = "NO_TRADE"
-
-    return {
-        "symbol": symbol,
-        "price": price,
-        "prob_up": prob_up,
-        "trend_up": trend_ok,
-        "signal": signal
-    }
-
-# =====================
-# OUTPUT
-# =====================
-def write_output(brent, wti):
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = []
-    lines.append("===================================")
-    lines.append("        OIL PRICE FORECAST")
-    lines.append("===================================")
-    lines.append(f"Run time (UTC): {now}")
+    lines.append("=" * 40)
+    lines.append("OIL PRICE FORECAST (BRENT + WTI)")
+    lines.append("=" * 40)
+    lines.append(f"Run time (UTC): {datetime.utcnow():%Y-%m-%d %H:%M:%S}")
     lines.append("")
+    lines.append(f"Brent Close : {last['Brent']:.2f}")
+    lines.append(f"WTI Close   : {last['WTI']:.2f}")
+    lines.append("")
+    lines.append(f"Prob UP   : {prob_up:.2%}")
+    lines.append(f"Prob DOWN : {prob_down:.2%}")
+    lines.append("")
+    lines.append(f"Trend 50/200 OK: {trend_ok}")
+    lines.append(f"Signal: {signal}")
+    lines.append("=" * 40)
 
-    for r in (brent, wti):
-        lines.append(f"Market: {r['symbol']}")
-        lines.append(f"Price : {r['price']:.2f}")
-        lines.append(f"Prob UP: {r['prob_up']:.2%}")
-        lines.append(f"Trend UP: {r['trend_up']}")
-        lines.append(f"Signal: {r['signal']}")
-        lines.append("-----------------------------------")
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+    with open(OUTPUT_FILE, "w") as f:
         f.write("\n".join(lines))
 
-# =====================
-# MAIN
-# =====================
-def main():
-    brent = forecast(BRENT)
-    wti = forecast(WTI)
-    write_output(brent, wti)
-    print("[OK] Forecast written to forecast_output.txt")
+    print("\n".join(lines))
 
 if __name__ == "__main__":
     main()
