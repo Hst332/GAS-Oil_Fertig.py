@@ -119,8 +119,6 @@ def build_signal(df: pd.DataFrame):
 def main():
     df = load_prices()
     res = build_signal(df)
-    write_output_txt(result)
     print("[OK] oil_forecast_output.txt written")
-
 if __name__ == "__main__":
     main()
