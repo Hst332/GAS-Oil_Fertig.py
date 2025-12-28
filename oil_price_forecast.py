@@ -108,7 +108,7 @@ def build_signal(df: pd.DataFrame):
         Signal        : {result['signal']}
         ===================================
         """
-        with open("oil_forecast_output.txt", "w", encoding="utf-8") as f:
+    with open("oil_forecast_output.txt", "w", encoding="utf-8") as f:
                 f.write(text)
 
         write_output_txt(result)
