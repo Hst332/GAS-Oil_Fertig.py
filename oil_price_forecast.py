@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
-CODE A – robust, calm, professional
+CODE A – robust & professional
+
 Brent + WTI + Spread
 TXT output only (always overwritten)
 """
@@ -35,7 +36,7 @@ def load_prices():
     return df.dropna()
 
 # =========================
-# SIGNAL LOGIC – CODE A
+# SIGNAL LOGIC (CODE A)
 # =========================
 def build_signal(df: pd.DataFrame):
     df = df.copy()
@@ -63,7 +64,6 @@ def build_signal(df: pd.DataFrame):
         prob_up -= 0.03
 
     prob_up = max(0.0, min(1.0, prob_up))
-    prob_down = 1.0 - prob_up
 
     if prob_up >= 0.57:
         signal = "UP"
@@ -76,7 +76,7 @@ def build_signal(df: pd.DataFrame):
         "run_time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "data_date": last.name.date().isoformat(),
         "prob_up": prob_up,
-        "prob_down": prob_down,
+        "prob_down": 1 - prob_up,
         "signal": signal,
         "brent": float(last["Brent_Close"]),
         "wti": float(last["WTI_Close"]),
@@ -84,7 +84,7 @@ def build_signal(df: pd.DataFrame):
     }
 
 # =========================
-# OUTPUT (TXT)
+# OUTPUT
 # =========================
 def write_output_txt(result: dict):
     text = f"""===================================
@@ -95,7 +95,7 @@ Data date     : {result['data_date']}
 
 Brent Close   : {result['brent']:.2f}
 WTI Close     : {result['wti']:.2f}
-Brent-WTI     : {result['spread']:.2f}
+Spread        : {result['spread']:.2f}
 
 Prob UP       : {result['prob_up']:.2%}
 Prob DOWN     : {result['prob_down']:.2%}
@@ -113,7 +113,7 @@ def main():
     df = load_prices()
     result = build_signal(df)
     write_output_txt(result)
-    print("[OK] oil_forecast_output.txt written")
+    print(f"[OK] {OUTPUT_TXT} written")
 
 if __name__ == "__main__":
     main()
