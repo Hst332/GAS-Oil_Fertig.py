@@ -110,8 +110,7 @@ def build_signal(df: pd.DataFrame):
         """
     with open("oil_forecast_output.txt", "w", encoding="utf-8") as f:
                 f.write(text)
-
-        write_output_txt(result)
+    write_output_txt(result)
 
 
 # =========================
