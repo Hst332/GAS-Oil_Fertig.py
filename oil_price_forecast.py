@@ -1,176 +1,137 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
-CODE A – Clean, robust Brent/WTI forecast
 
-- Data: Yahoo Finance (WTI + Brent)
-- Features: returns, lags, Brent–WTI spread
-- Simple RandomForest
-- Trend filter
-- TXT output (overwritten every run)
+CODE A – Ruhig, robust, professionell
+- Brent & WTI von Yahoo Finance
+- Brent–WTI Spread
+- Kein ML, kein sklearn
+- TXT Output (überschreibt jedes Mal)
 """
 
-import json
-from datetime import datetime
-import numpy as np
-import pandas as pd
 import yfinance as yf
+import pandas as pd
+from datetime import datetime
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import accuracy_score
-
-# ======================
-# CONFIG
-# ======================
-WTI_SYMBOL = "CL=F"
-BRENT_SYMBOL = "BZ=F"
+# -----------------------
+# Config
+# -----------------------
 START_DATE = "2015-01-01"
+BRENT_SYMBOL = "BZ=F"
+WTI_SYMBOL = "CL=F"
 
 OUTPUT_TXT = "oil_forecast_output.txt"
 
-PROB_TRADE_THRESHOLD = 0.57
-MIN_ROWS = 250
-
-# ======================
-# DATA LOADING
-# ======================
+# -----------------------
+# Load data
+# -----------------------
 def load_prices():
-    wti = yf.download(WTI_SYMBOL, start=START_DATE, progress=False, auto_adjust=True)
-    brent = yf.download(BRENT_SYMBOL, start=START_DATE, progress=False, auto_adjust=True)
+    brent = yf.download(BRENT_SYMBOL, start=START_DATE, progress=False)
+    wti = yf.download(WTI_SYMBOL, start=START_DATE, progress=False)
 
-    if wti.empty or brent.empty:
+    if brent.empty or wti.empty:
         raise RuntimeError("Yahoo returned empty data")
 
-    wti = wti[["Close"]].rename(columns={"Close": "WTI_Close"})
-    brent = brent[["Close"]].rename(columns={"Close": "Brent_Close"})
+    df = pd.DataFrame({
+        "Brent": brent["Close"],
+        "WTI": wti["Close"]
+    }).dropna()
 
-    df = wti.join(brent, how="inner")
-    df = df.dropna().sort_index()
     return df
 
-# ======================
-# FEATURES
-# ======================
-def build_features(df):
+# -----------------------
+# Forecast logic (CODE A)
+# -----------------------
+def compute_forecast(df: pd.DataFrame) -> dict:
     df = df.copy()
 
-    df["WTI_Return"] = df["WTI_Close"].pct_change()
-    df["Brent_Return"] = df["Brent_Close"].pct_change()
+    # Returns
+    df["Brent_ret"] = df["Brent"].pct_change()
+    df["WTI_ret"] = df["WTI"].pct_change()
 
-    df["Spread"] = df["Brent_Close"] - df["WTI_Close"]
-    df["Spread_Change"] = df["Spread"].diff()
-
-    for l in range(1, 6):
-        df[f"WTI_Return_lag{l}"] = df["WTI_Return"].shift(l)
-        df[f"Spread_Change_lag{l}"] = df["Spread_Change"].shift(l)
-
-    # Target: next day direction (WTI)
-    df["Target"] = (df["WTI_Return"].shift(-1) > 0).astype(int)
+    # Spread
+    df["Spread"] = df["Brent"] - df["WTI"]
+    df["Spread_change"] = df["Spread"].diff()
 
     df = df.dropna()
-    return df
 
-# ======================
-# MODEL
-# ======================
-def train_model(df, features):
-    X = df[features]
-    y = df["Target"]
+    last = df.iloc[-1]
 
-    tscv = TimeSeriesSplit(n_splits=5)
-    scores = []
+    prob_up = 0.50
 
-    for train_idx, test_idx in tscv.split(X):
-        model = RandomForestClassifier(
-            n_estimators=300,
-            max_depth=6,
-            min_samples_leaf=5,
-            random_state=42,
-        )
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
-        preds = model.predict(X.iloc[test_idx])
-        scores.append(accuracy_score(y.iloc[test_idx], preds))
+    # Trend contribution
+    if last["Brent_ret"] > 0:
+        prob_up += 0.015
+    else:
+        prob_up -= 0.015
 
-    final_model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=6,
-        min_samples_leaf=5,
-        random_state=42,
-    )
-    final_model.fit(X, y)
+    if last["WTI_ret"] > 0:
+        prob_up += 0.015
+    else:
+        prob_up -= 0.015
 
-    return final_model, float(np.mean(scores)), float(np.std(scores))
+    # Spread logic
+    if last["Spread_change"] > 0:
+        prob_up += 0.01
+    else:
+        prob_up -= 0.01
 
-# ======================
-# OUTPUT
-# ======================
-def write_txt(result):
-    lines = []
-    lines.append("===================================")
-    lines.append("   OIL FORECAST – BRENT / WTI")
-    lines.append("===================================")
-    lines.append(f"Run time (UTC): {result['run_time']}")
-    lines.append(f"Data date     : {result['data_date']}")
-    lines.append("")
-    lines.append(f"Model CV      : {result['cv_mean']:.2%} ± {result['cv_std']:.2%}")
-    lines.append("")
-    lines.append(f"Prob UP       : {result['prob_up']:.2%}")
-    lines.append(f"Prob DOWN     : {result['prob_down']:.2%}")
-    lines.append(f"Signal        : {result['signal']}")
-    lines.append("===================================")
-
-    with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-# ======================
-# MAIN
-# ======================
-def main():
-    df_prices = load_prices()
-    df = build_features(df_prices)
-
-    if len(df) < MIN_ROWS:
-        raise RuntimeError("Not enough data")
-
-    feature_cols = [
-        c for c in df.columns
-        if c.startswith("WTI_Return_lag") or c.startswith("Spread_Change_lag")
-    ]
-
-    model, cv_mean, cv_std = train_model(df, feature_cols)
-
-    last = df.iloc[-1:]
-    prob_up = float(model.predict_proba(last[feature_cols])[0][1])
+    # Clamp
+    prob_up = max(0.45, min(0.55, prob_up))
     prob_down = 1.0 - prob_up
 
-    # Trend filter (WTI)
-    trend_up = (
-        df["WTI_Close"].iloc[-1]
-        > df["WTI_Close"].rolling(50).mean().iloc[-1]
-    )
-
-    if prob_up >= PROB_TRADE_THRESHOLD and trend_up:
+    # Signal
+    if prob_up >= 0.57:
         signal = "UP"
-    elif prob_down >= PROB_TRADE_THRESHOLD and not trend_up:
+    elif prob_up <= 0.43:
         signal = "DOWN"
     else:
         signal = "NO_TRADE"
 
-    result = {
-        "run_time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_date": df.index[-1].date().isoformat(),
+    return {
         "prob_up": prob_up,
         "prob_down": prob_down,
         "signal": signal,
-        "cv_mean": cv_mean,
-        "cv_std": cv_std,
+        "data_date": last.name.date().isoformat(),
+        "brent": float(last["Brent"]),
+        "wti": float(last["WTI"]),
+        "spread": float(last["Spread"]),
     }
 
-    write_txt(result)
+# -----------------------
+# Output
+# -----------------------
+def write_txt(result: dict):
+    now_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-# ======================
-# ENTRYPOINT
-# ======================
+    lines = [
+        "===================================",
+        "   OIL FORECAST – BRENT / WTI (A)",
+        "===================================",
+        f"Run time (UTC): {now_utc}",
+        f"Data date     : {result['data_date']}",
+        "",
+        f"Brent Close   : {result['brent']:.2f}",
+        f"WTI Close     : {result['wti']:.2f}",
+        f"Brent–WTI Spd : {result['spread']:.2f}",
+        "",
+        f"Prob UP       : {result['prob_up']*100:.2f}%",
+        f"Prob DOWN     : {result['prob_down']*100:.2f}%",
+        f"Signal        : {result['signal']}",
+        "===================================",
+    ]
+
+    with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+# -----------------------
+# Main
+# -----------------------
+def main():
+    df = load_prices()
+    result = compute_forecast(df)
+    write_txt(result)
+    print("[OK] Oil forecast written to", OUTPUT_TXT)
+
 if __name__ == "__main__":
     main()
