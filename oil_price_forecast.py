@@ -96,28 +96,23 @@ def build_signal(df: pd.DataFrame):
 # =========================
 # OUTPUT
 # =========================
-def write_txt(res: dict):
-    now_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        def write_output_txt(result):
+            text = f"""===================================
+           OIL FORECAST – CODE A
+        ===================================
+        Run time (UTC): {result['run_time']}
+        Data date     : {result['data_date']}
+        
+        Prob UP       : {result['prob_up']:.2%}
+        Prob DOWN     : {1 - result['prob_up']:.2%}
+        Signal        : {result['signal']}
+        ===================================
+        """
+            with open("oil_forecast_output.txt", "w", encoding="utf-8") as f:
+                f.write(text)
 
-    lines = [
-        "===================================",
-        "   OIL FORECAST – CODE A",
-        "===================================",
-        f"Run time (UTC): {now_utc}",
-        f"Data date     : {res['date']}",
-        "",
-        f"Brent Close   : {res['brent']:.2f}",
-        f"WTI Close     : {res['wti']:.2f}",
-        f"Brent-WTI Spr.: {res['spread']:.2f}",
-        "",
-        f"Prob UP       : {res['prob_up']*100:.2f}%",
-        f"Prob DOWN     : {res['prob_down']*100:.2f}%",
-        f"Signal        : {res['signal']}",
-        "===================================",
-    ]
+        write_output_txt(result)
 
-    with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
 
 # =========================
 # MAIN
