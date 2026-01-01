@@ -20,7 +20,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yfinance pandas
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run forecast
         run: |
@@ -30,6 +31,6 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add oil_price_forecast.txt
-          git commit -m "Update oil forecast" || echo "No changes"
+          git add energy_forecast_output.txt
+          git commit -m "Update energy forecast" || echo "No changes"
           git push
